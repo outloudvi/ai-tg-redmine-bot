@@ -3,14 +3,17 @@ import telebot
 
 from redmine_bot.middleware import UserAuthorizationMiddleware
 from redmine_bot.env import REDMINE_URL, REDMINE_API_TOKEN
+from redmine_bot.utils import try_to_state
 
-STATUS_ID_MAPPING = {
-    1: "New",
-    2: "InProgress",
-    3: "Resolved",
-    4: "Blocked",
-    5: "Closed"
-}
+
+HELP_MSG = "🤖 欢迎使用 Redmine 机器人！可用命令：\n" \
+    "/issues - 列出你的工单\n" \
+    "/create [项目ID] [标题] [描述] - 创建工单\n" \
+    "/comment [工单ID] [评论] - 添加评论\n" \
+    "/state [工单ID] [状态] - 修改工单状态\n" \
+    "/issue [工单ID] - 查看工单状态" \
+    "/resolve [工单ID] - 完成工单" \
+    "/close [工单ID] - 关闭工单"
 
 
 class RedmineBot:
@@ -18,6 +21,7 @@ class RedmineBot:
         self.bot = telebot.TeleBot(token)
         self.auth_middleware = auth_middleware
         self.setup_handlers()
+        self.status_id_mapping = self.get_issue_statuses()
 
     def check_authorization(self, message):
         """
@@ -31,17 +35,13 @@ class RedmineBot:
 
     # pylint-ignore: R0915
     def setup_handlers(self):
-        @self.bot.message_handler(commands=['start'])
+        @self.bot.message_handler(commands=['start', 'help'])
         def send_welcome(message):
             # 首先检查授权
             if not self.check_authorization(message):
                 return
 
-            self.bot.reply_to(message, "🤖 欢迎使用 Redmine 机器人！可用命令：\n"
-                              "/issues - 列出你的工单\n"
-                              "/create [项目ID] [标题] [描述] - 创建工单\n"
-                              "/comment [工单ID] [评论] - 添加评论\n"
-                              "/state [工单ID] [状态] - 修改工单状态")
+            self.bot.reply_to(message, HELP_MSG)
 
         @self.bot.message_handler(commands=['issues'])
         def list_issues(message):
@@ -141,7 +141,7 @@ class RedmineBot:
 
                 # 添加评论的 API 请求
                 comment_data = {
-                    'journal': {
+                    'issue': {
                         'notes': comment
                     }
                 }
@@ -156,7 +156,7 @@ class RedmineBot:
                     timeout=10
                 )
 
-                if response.status_code == 200:
+                if response.status_code == 204:
                     self.bot.reply_to(message, "💬 评论添加成功！")
                 else:
                     self.bot.reply_to(message, f"❌ 添加评论失败：{response.text}")
@@ -179,6 +179,8 @@ class RedmineBot:
 
                 _, issue_id, status_id = parts
 
+                status_id = try_to_state(status_id, self.status_id_mapping)
+
                 # 更新工单状态的 API 请求
                 update_data = {
                     'issue': {
@@ -196,11 +198,14 @@ class RedmineBot:
                     timeout=10
                 )
 
-                if response.status_code == 200:
+                if response.status_code == 204:
                     self.bot.reply_to(message, "🔄 工单状态更新成功！")
                 else:
                     self.bot.reply_to(message, f"❌ 更新工单状态失败：{response.text}")
 
+            except ValueError:
+                self.bot.reply_to(
+                    message, f"❌ 无效的状态。支持的状态： {", ".join(self.status_id_mapping.values())}")
             except Exception as e:
                 self.bot.reply_to(message, f"❌ 发生错误：{str(e)}")
 
@@ -222,7 +227,7 @@ class RedmineBot:
                 # 获取工单详细信息
                 response = requests.get(
                     f"{REDMINE_URL}/issues/{issue_id}.json",
-                    params={"include": ["journals", "attachments"]},
+                    params={"include": ",".join(["journals", "attachments"])},
                     headers={"X-Redmine-API-Key": REDMINE_API_TOKEN},
                     timeout=10
                 )
@@ -275,6 +280,50 @@ class RedmineBot:
             except Exception as e:
                 self.bot.reply_to(message, f"❌ 发生未知错误：{str(e)}")
 
+        @self.bot.message_handler(commands=['resolve'])
+        def resolve(message):
+            # 检查授权
+            if not self.check_authorization(message):
+                return
+
+            parts = message.text.split(' ')
+            if len(parts) < 2:
+                self.bot.reply_to(message, "使用方法：/resolve [工单ID]")
+                return
+
+            issue_id = parts[1]
+            message.text = f"/state {issue_id} resolved"
+            update_issue_state(message)
+
+        @self.bot.message_handler(commands=['close'])
+        def close(message):
+            # 检查授权
+            if not self.check_authorization(message):
+                return
+
+            parts = message.text.split(' ')
+            if len(parts) < 2:
+                self.bot.reply_to(message, "使用方法：/close [工单ID]")
+                return
+
+            issue_id = parts[1]
+            message.text = f"/state {issue_id} closed"
+            update_issue_state(message)
+
     def start(self):
         print("🚀 Redmine Bot 已启动")
         self.bot.polling(none_stop=True)
+
+    def get_issue_statuses(self):
+        response = requests.get(
+            f"{REDMINE_URL}/issue_statuses.json",
+            headers={"X-Redmine-API-Key": REDMINE_API_TOKEN},
+            timeout=10
+        )
+        issue_statuses = response.json().get("issue_statuses", [])
+
+        result = {}
+        for status in issue_statuses:
+            result[status["id"]] = status["name"]
+
+        return result
