@@ -1,0 +1,54 @@
+[tool.poetry]
+authors = ["Claude-35-Haiku <claude-35-haiku@example.com>"]
+description = "A Telegram bot for interacting with Redmine issues"
+name = "redmine-telegram-bot"
+packages = [{include = "redmine_bot"}]
+readme = "README.md"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+pyTelegramBotAPI = "^4.14.0"
+python = "^3.9"
+requests = "^2.31.0"
+python-dotenv = "^1.0.1"
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.11.0"
+flake8 = "^6.1.0"
+mypy = "^1.7.1"
+pytest = "^7.4.3"
+pylint = "^3.3.4"
+
+[tool.poetry.scripts]
+redmine-bot = "redmine_bot.main:main"
+
+[build-system]
+build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.flake8]
+extend-ignore = "E203"
+max-line-length = 100
+
+[tool.pylint.messages_control]
+disable = [
+    "C0114",
+    "C0115",
+    "C0116",
+    "W0718",
+    "R0915",
+    "R0903"
+]
+
+# 可选：额外的 Pylint 配置
+[tool.pylint.format]
+max-line-length = 100
